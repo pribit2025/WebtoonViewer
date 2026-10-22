@@ -24,7 +24,7 @@
 
         <activity
             android:name=".ReaderActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density"
             android:exported="false"
             android:theme="@style/Theme.WebtoonViewer.Reader" />
     </application>

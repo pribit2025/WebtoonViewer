@@ -120,7 +120,7 @@ class ReaderActivity : AppCompatActivity() {
 
         rv.doOnLayout {
             lastWidth = rv.width
-            applyMargin(prefs.marginPercent, keepAnchor = false)
+            applyMargin(effectiveMargin(), keepAnchor = false)
             openChapter(index)
         }
     }
@@ -142,7 +142,25 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 회전 시 레이아웃 변경은 rv 의 layout change listener 에서 처리
+        // 폴드 접기/펼치기, 회전: 여백 적용 여부와 이미지 높이를 다시 계산
+        updateMarginUi()
+        rv.post { applyMargin(effectiveMargin(), keepAnchor = true) }
+    }
+
+    /**
+     * 펼친 화면 여부. 갤럭시 폴드의 펼친 화면(최소 폭 600dp 이상)에서만 여백을 적용하고,
+     * 접은 화면(커버 화면)은 항상 폭에 맞춰 표시한다.
+     */
+    private fun isWideScreen() = resources.configuration.smallestScreenWidthDp >= 600
+
+    private fun effectiveMargin() = if (isWideScreen()) prefs.marginPercent else 0
+
+    /** 여백 슬라이더 상태 표시: 접은 화면에서는 비활성 + 안내 */
+    private fun updateMarginUi() {
+        val wide = isWideScreen()
+        seekMargin.isEnabled = wide
+        seekMargin.alpha = if (wide) 1f else 0.4f
+        marginText.text = if (wide) "${prefs.marginPercent}%" else "폭맞춤"
     }
 
     // ---------------------------------------------------------------- 초기화
@@ -204,7 +222,7 @@ class ReaderActivity : AppCompatActivity() {
             val w = right - left
             if (lastWidth != 0 && w != oldRight - oldLeft && w > 0) {
                 lastWidth = w
-                rv.post { applyMargin(prefs.marginPercent, keepAnchor = true) }
+                rv.post { applyMargin(effectiveMargin(), keepAnchor = true) }
             }
         }
 
@@ -257,10 +275,10 @@ class ReaderActivity : AppCompatActivity() {
 
         // 좌우 여백
         seekMargin.progress = prefs.marginPercent
-        marginText.text = "${prefs.marginPercent}%"
+        updateMarginUi()
         seekMargin.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
+                if (!fromUser || !isWideScreen()) return
                 marginText.text = "$progress%"
                 prefs.marginPercent = progress
                 applyMargin(progress, keepAnchor = true)

@@ -142,10 +142,10 @@ class MainActivity : AppCompatActivity() {
         val sorted = if (prefs.worksByRecent) {
             works.sortedWith(
                 compareByDescending<Work> { prefs.lastReadTime(it.name) }
-                    .thenComparator { a, b -> Library.naturalCompare(a.name, b.name) }
+                    .thenComparator { a, b -> Library.compareWorkNames(a.name, b.name) }
             )
         } else {
-            works.sortedWith { a, b -> Library.naturalCompare(a.name, b.name) }
+            works.sortedWith { a, b -> Library.compareWorkNames(a.name, b.name) }
         }
         if (sorted.isEmpty()) {
             emptyText.setText(R.string.no_works)
