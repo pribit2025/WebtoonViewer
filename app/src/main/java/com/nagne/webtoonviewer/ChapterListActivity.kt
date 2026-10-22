@@ -15,6 +15,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
@@ -39,6 +40,10 @@ class ChapterListActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var btnContinue: ExtendedFloatingActionButton
     private val adapter = ChapterAdapter()
+    private val folderAdapter = FolderAdapter()
+
+    /** 시즌/부 등 서브폴더 (눌러서 들어가야 그 안의 화가 보임) */
+    private var folders: List<DocItem> = emptyList()
 
     /** 오름차순 화 목록 (원본 순서) */
     private var chapters: List<Chapter> = emptyList()
@@ -60,7 +65,7 @@ class ChapterListActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         btnContinue = findViewById(R.id.btn_continue)
         list.layoutManager = LinearLayoutManager(this)
-        list.adapter = adapter
+        list.adapter = ConcatAdapter(folderAdapter, adapter)
         btnContinue.setOnClickListener { continueTarget()?.let { openReader(it) } }
 
         load()
@@ -68,7 +73,10 @@ class ChapterListActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (chapters.isNotEmpty()) refresh()
+        if (chapters.isNotEmpty() || folders.isNotEmpty()) {
+            folderAdapter.notifyDataSetChanged()
+            refresh()
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -104,11 +112,13 @@ class ChapterListActivity : AppCompatActivity() {
         progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { Library.listChapters(this@ChapterListActivity, workUri) }
+                runCatching { Library.listFolder(this@ChapterListActivity, workUri) }
             }
             progress.visibility = View.GONE
             result.onSuccess {
-                chapters = it
+                chapters = it.chapters
+                folders = it.subFolders
+                folderAdapter.notifyDataSetChanged()
                 refresh()
             }.onFailure {
                 Toast.makeText(this@ChapterListActivity, "목록을 읽을 수 없습니다.", Toast.LENGTH_LONG).show()
@@ -122,7 +132,10 @@ class ChapterListActivity : AppCompatActivity() {
         adapter.submit(shown)
 
         val read = chapters.count { prefs.isRead(key(it)) }
-        supportActionBar?.subtitle = "$read / ${chapters.size}화 읽음"
+        supportActionBar?.subtitle = buildString {
+            append("$read / ${chapters.size}화 읽음")
+            if (folders.isNotEmpty()) append("  ·  폴더 ${folders.size}개")
+        }
 
         val target = continueTarget()
         if (target == null) {
@@ -137,7 +150,7 @@ class ChapterListActivity : AppCompatActivity() {
         if (firstShow) {
             firstShow = false
             val last = prefs.lastChapter(workName)
-            val idx = shown.indexOfFirst { it.name == last }
+            val idx = shown.indexOfFirst { it.name == last }.let { if (it >= 0) it + folders.size else it }
             if (idx > 2) (list.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(idx - 2, 0)
         }
     }
@@ -190,6 +203,44 @@ class ChapterListActivity : AppCompatActivity() {
                 refresh()
             }
             .show()
+    }
+
+    /** 서브폴더 열기: 같은 화면을 그 폴더 기준으로 다시 연다 */
+    private fun openFolder(f: DocItem) {
+        startActivity(
+            Intent(this, ChapterListActivity::class.java)
+                .putExtra(EXTRA_WORK_NAME, "$workName / ${f.name}")
+                .putExtra(EXTRA_WORK_URI, f.uri.toString())
+        )
+    }
+
+    // ---------------- 서브폴더 어댑터 (목록 맨 위) ----------------
+
+    private inner class FolderAdapter : RecyclerView.Adapter<FolderAdapter.VH>() {
+        inner class VH(v: View) : RecyclerView.ViewHolder(v) {
+            val marker: View = v.findViewById(R.id.marker)
+            val name: TextView = v.findViewById(R.id.name)
+            val status: TextView = v.findViewById(R.id.status)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
+            VH(LayoutInflater.from(parent.context).inflate(R.layout.item_chapter, parent, false))
+
+        override fun getItemCount() = folders.size
+
+        override fun onBindViewHolder(h: VH, position: Int) {
+            val f = folders[position]
+            val ctx = this@ChapterListActivity
+            val sub = "$workName / ${f.name}"
+            h.marker.visibility = View.INVISIBLE
+            h.name.text = f.name
+            h.name.setTextColor(ContextCompat.getColor(ctx, R.color.text))
+            h.status.setTextColor(ContextCompat.getColor(ctx, R.color.accent))
+            // 그 폴더에서 마지막으로 본 화가 있으면 표시
+            h.status.text = if (prefs.lastChapter(sub) != null) "보는 중 ›" else "폴더 ›"
+            h.itemView.setOnClickListener { openFolder(f) }
+            h.itemView.setOnLongClickListener(null)
+        }
     }
 
     // ---------------- 화 목록 어댑터 ----------------

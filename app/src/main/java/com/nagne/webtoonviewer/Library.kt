@@ -3,6 +3,9 @@ package com.nagne.webtoonviewer
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.math.BigInteger
 import java.text.Collator
 import java.text.Normalizer
@@ -16,21 +19,32 @@ data class DocItem(
     val isDir: Boolean,
 )
 
-/** 작품 */
+/**
+ * 작품
+ * chapters: 작품 폴더에 바로 들어있는 화 (서브폴더 안의 화는 포함하지 않음)
+ * subFolderCount: 시즌/부 등 서브폴더 수 (화 목록 화면에서 폴더로 표시)
+ */
 data class Work(
     val name: String,
     val uri: Uri,
     val chapters: List<Chapter>,
-)
+    val subFolderCount: Int,
+) {
+    /** 정렬 키 (스캔 시 한 번만 계산) */
+    val sortKey: String = Library.workSortKey(name)
+}
 
-/**
- * 화(= zip/cbz 파일 또는 이미지 폴더)
- * name: 작품 폴더 기준 상대 경로 (예: "001화.zip", "1부/001화.zip")
- */
+/** 화(= zip/cbz 파일 또는 이미지 폴더) */
 data class Chapter(
     val name: String,
     val uri: Uri,
     val isDir: Boolean,
+)
+
+/** 폴더 한 단계의 내용: 화 목록 + 서브폴더 목록 */
+data class FolderContents(
+    val chapters: List<Chapter>,
+    val subFolders: List<DocItem>,
 )
 
 object Library {
@@ -38,11 +52,8 @@ object Library {
     private val CHAPTER_EXT = setOf("zip", "cbz")
     val IMAGE_EXT = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic", "heif")
 
-    /** 작품 폴더 안에서 화를 찾을 하위 폴더 최대 깊이 (시즌/부 폴더 대응) */
-    private const val CHAPTER_DEPTH = 3
-
     /** 분류 폴더를 따라 작품을 찾을 최대 깊이 */
-    private const val WORK_DEPTH = 4
+    private const val WORK_DEPTH = 3
 
     fun ext(name: String): String = name.substringAfterLast('.', "").lowercase()
 
@@ -85,6 +96,9 @@ object Library {
         return result
     }
 
+    private fun safeList(ctx: Context, uri: Uri): List<DocItem> =
+        runCatching { listChildren(ctx, uri) }.getOrDefault(emptyList())
+
     /** 트리 루트의 표시 이름 */
     fun rootName(ctx: Context, treeUri: Uri): String {
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
@@ -95,53 +109,51 @@ object Library {
         return "Library"
     }
 
-    // ------------------------------------------------------------ 화 목록
-
-    /**
-     * 작품 폴더 안의 화 목록 (자연 정렬, 오름차순)
-     * - 바로 아래의 zip/cbz
-     * - 이미지가 바로 들어있는 하위 폴더 (이미지 폴더형 화)
-     * - 시즌/부 하위 폴더 안의 zip/cbz (이름: "1부/001화.zip")
-     */
-    fun listChapters(ctx: Context, workUri: Uri): List<Chapter> {
-        val out = ArrayList<Chapter>()
-        collectChapters(ctx, workUri, "", 0, out, listChildren(ctx, workUri))
-        val keys = out.associateWith { chapterSortKey(it.name) }
-        return out.sortedWith { a, b -> naturalCompareKeys(keys.getValue(a), keys.getValue(b)) }
+    private fun sortChapters(list: List<Chapter>): List<Chapter> {
+        val keys = list.associateWith { chapterSortKey(it.name) }
+        return list.sortedWith { a, b -> naturalCompareKeys(keys.getValue(a), keys.getValue(b)) }
     }
 
-    private fun collectChapters(
-        ctx: Context,
-        dirUri: Uri,
-        prefix: String,
-        depth: Int,
-        out: MutableList<Chapter>,
-        children: List<DocItem>,
-    ) {
-        for (c in children) {
-            if (!c.isDir && isChapterFile(c.name)) out.add(Chapter(prefix + c.name, c.uri, false))
-        }
-        for (d in children.filter { it.isDir }) {
-            val sub = runCatching { listChildren(ctx, d.uri) }.getOrDefault(emptyList())
-            if (sub.any { !it.isDir && isImageFile(it.name) }) {
-                // 이미지가 바로 들어있는 폴더 = 이미지 폴더형 화
-                out.add(Chapter(prefix + d.name, d.uri, true))
-            } else if (depth + 1 < CHAPTER_DEPTH) {
-                // 시즌/부 폴더 → 안쪽까지 탐색
-                collectChapters(ctx, d.uri, prefix + d.name + "/", depth + 1, out, sub)
-            }
+    private fun sortDocs(list: List<DocItem>): List<DocItem> {
+        val keys = list.associateWith { chapterSortKey(it.name) }
+        return list.sortedWith { a, b -> naturalCompareKeys(keys.getValue(a), keys.getValue(b)) }
+    }
+
+    /**
+     * 하위 폴더들이 "이미지 폴더형 화"인지 판단.
+     * 속도를 위해 첫 번째 폴더 하나만 확인한다 (보통 모든 화 폴더가 같은 형태).
+     */
+    private fun subDirsAreImageChapters(ctx: Context, sortedDirs: List<DocItem>): Boolean {
+        val first = sortedDirs.firstOrNull() ?: return false
+        return safeList(ctx, first.uri).any { !it.isDir && isImageFile(it.name) }
+    }
+
+    // ------------------------------------------------------------ 폴더 한 단계 조회
+
+    /**
+     * 폴더 한 단계만 조회 (화 목록 화면용)
+     * - 바로 아래의 zip/cbz → 화
+     * - 하위 폴더가 이미지 폴더형 화이면 → 화, 아니면 → 서브폴더(들어가야 보임)
+     */
+    fun listFolder(ctx: Context, folderUri: Uri): FolderContents {
+        val children = listChildren(ctx, folderUri)
+        val zips = children.filter { !it.isDir && isChapterFile(it.name) }
+            .map { Chapter(it.name, it.uri, false) }
+        val dirs = sortDocs(children.filter { it.isDir })
+        return if (dirs.isNotEmpty() && subDirsAreImageChapters(ctx, dirs)) {
+            FolderContents(sortChapters(zips + dirs.map { Chapter(it.name, it.uri, true) }), emptyList())
+        } else {
+            FolderContents(sortChapters(zips), dirs)
         }
     }
 
     // ------------------------------------------------------------ 라이브러리 스캔
 
     /**
-     * 라이브러리 스캔 (자동 판단)
+     * 라이브러리 스캔 (폴더당 조회 1~2회로 최소화)
      * - 루트에 zip/cbz 가 바로 있으면 루트 자체를 하나의 작품으로 취급
-     * - 폴더에 zip/cbz 또는 이미지 폴더형 화가 바로 있으면 → 그 폴더가 작품
-     *   (작품 안의 시즌/부 폴더는 같은 작품에 합쳐짐)
-     * - 화 없이 하위 폴더만 있으면 → 분류 폴더로 보고 하위 폴더를 각각 작품으로 표시
-     *   (작품 이름: "분류 / 작품")
+     * - 폴더에 zip/cbz 가 바로 있거나 하위 폴더가 이미지 폴더형 화이면 → 작품
+     * - 화 없이 하위 폴더만 있으면 → 분류 폴더로 보고 하위 폴더를 각각 작품으로 표시 ("분류 / 작품")
      */
     fun scan(ctx: Context, treeUri: Uri): List<Work> {
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
@@ -151,43 +163,83 @@ object Library {
 
         val rootZips = children.filter { !it.isDir && isChapterFile(it.name) }
         if (rootZips.isNotEmpty()) {
-            val chapters = rootZips.map { Chapter(it.name, it.uri, false) }
-            val keys = chapters.associateWith { chapterSortKey(it.name) }
             works.add(
                 Work(
                     rootName(ctx, treeUri), rootUri,
-                    chapters.sortedWith { a, b -> naturalCompareKeys(keys.getValue(a), keys.getValue(b)) }
+                    sortChapters(rootZips.map { Chapter(it.name, it.uri, false) }), 0
                 )
             )
         }
-        for (dir in children.filter { it.isDir }) {
-            scanFolder(ctx, dir, "", 0, works)
-        }
+        for (dir in children.filter { it.isDir }) scanFolder(ctx, dir, "", 0, works)
         return works
     }
 
     private fun scanFolder(ctx: Context, dir: DocItem, parentLabel: String, depth: Int, works: MutableList<Work>) {
-        val children = runCatching { listChildren(ctx, dir.uri) }.getOrDefault(emptyList())
+        val children = safeList(ctx, dir.uri)
         val label = parentLabel + dir.name
+        val zips = children.filter { !it.isDir && isChapterFile(it.name) }
+            .map { Chapter(it.name, it.uri, false) }
+        val dirs = sortDocs(children.filter { it.isDir })
 
-        val hasDirectZip = children.any { !it.isDir && isChapterFile(it.name) }
-        val subDirs = children.filter { it.isDir }
-
-        // 하위 폴더 각각의 내용을 한 번만 조회해 재사용
-        val subContents: Map<DocItem, List<DocItem>> = if (hasDirectZip) emptyMap() else
-            subDirs.associateWith { runCatching { listChildren(ctx, it.uri) }.getOrDefault(emptyList()) }
-        val hasImageFolder = subContents.values.any { sub -> sub.any { !it.isDir && isImageFile(it.name) } }
-
-        if (hasDirectZip || hasImageFolder) {
-            // 작품 폴더
-            val chapters = listChapters(ctx, dir.uri)
-            if (chapters.isNotEmpty()) works.add(Work(label, dir.uri, chapters))
+        if (zips.isNotEmpty()) {
+            // 작품 폴더 (서브폴더는 화 목록 화면에서 폴더로 표시)
+            works.add(Work(label, dir.uri, sortChapters(zips), dirs.size))
+            return
+        }
+        if (dirs.isEmpty()) return
+        if (subDirsAreImageChapters(ctx, dirs)) {
+            // 이미지 폴더형 화로 구성된 작품
+            works.add(Work(label, dir.uri, sortChapters(dirs.map { Chapter(it.name, it.uri, true) }), 0))
             return
         }
         // 분류 폴더 → 하위 폴더를 각각 작품 후보로
         if (depth + 1 >= WORK_DEPTH) return
-        for (sd in subDirs) scanFolder(ctx, sd, "$label / ", depth + 1, works)
+        for (sd in dirs) scanFolder(ctx, sd, "$label / ", depth + 1, works)
     }
+
+    // ------------------------------------------------------------ 스캔 결과 캐시
+
+    private fun cacheFile(ctx: Context) = File(ctx.filesDir, "library_cache.json")
+
+    /** 스캔 결과 저장 (다음 실행 시 즉시 표시용) */
+    fun saveCache(ctx: Context, treeUri: Uri, works: List<Work>) {
+        runCatching {
+            val arr = JSONArray()
+            for (w in works) {
+                val ch = JSONArray()
+                for (c in w.chapters) {
+                    ch.put(JSONObject().put("n", c.name).put("u", c.uri.toString()).put("d", c.isDir))
+                }
+                arr.put(
+                    JSONObject().put("n", w.name).put("u", w.uri.toString())
+                        .put("s", w.subFolderCount).put("c", ch)
+                )
+            }
+            val root = JSONObject().put("tree", treeUri.toString()).put("works", arr)
+            cacheFile(ctx).writeText(root.toString())
+        }
+    }
+
+    /** 저장된 스캔 결과 (같은 라이브러리 폴더일 때만) */
+    fun loadCache(ctx: Context, treeUri: Uri): List<Work>? = runCatching {
+        val f = cacheFile(ctx)
+        if (!f.exists()) return null
+        val root = JSONObject(f.readText())
+        if (root.optString("tree") != treeUri.toString()) return null
+        val arr = root.getJSONArray("works")
+        val works = ArrayList<Work>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val ch = o.getJSONArray("c")
+            val chapters = ArrayList<Chapter>(ch.length())
+            for (j in 0 until ch.length()) {
+                val c = ch.getJSONObject(j)
+                chapters.add(Chapter(c.getString("n"), Uri.parse(c.getString("u")), c.getBoolean("d")))
+            }
+            works.add(Work(o.getString("n"), Uri.parse(o.getString("u")), chapters, o.optInt("s", 0)))
+        }
+        works
+    }.getOrNull()
 
     // ------------------------------------------------------------ 정렬
 

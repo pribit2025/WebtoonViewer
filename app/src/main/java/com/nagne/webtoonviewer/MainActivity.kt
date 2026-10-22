@@ -121,19 +121,33 @@ class MainActivity : AppCompatActivity() {
             return
         }
         scanJob?.cancel()
-        progress.visibility = View.VISIBLE
         emptyView.visibility = View.GONE
         scanJob = lifecycleScope.launch {
+            // 1) 저장된 목록을 먼저 바로 표시 (실행 시 대기 없음)
+            if (works.isEmpty()) {
+                val cached = withContext(Dispatchers.IO) { Library.loadCache(this@MainActivity, tree) }
+                if (!cached.isNullOrEmpty()) {
+                    works = cached
+                    showWorks()
+                }
+            }
+            // 2) 백그라운드에서 폴더를 다시 읽어 바뀐 경우에만 갱신
+            progress.visibility = if (works.isEmpty()) View.VISIBLE else View.GONE
             val result = withContext(Dispatchers.IO) {
                 runCatching { Library.scan(this@MainActivity, tree) }
             }
             progress.visibility = View.GONE
-            result.onSuccess {
-                works = it
-                showWorks()
+            result.onSuccess { fresh ->
+                withContext(Dispatchers.IO) { Library.saveCache(this@MainActivity, tree, fresh) }
+                if (fresh != works) {
+                    works = fresh
+                    showWorks()
+                }
             }.onFailure {
-                Toast.makeText(this@MainActivity, "폴더를 읽을 수 없습니다: ${it.message}", Toast.LENGTH_LONG).show()
-                emptyView.visibility = View.VISIBLE
+                if (works.isEmpty()) {
+                    Toast.makeText(this@MainActivity, "폴더를 읽을 수 없습니다: ${it.message}", Toast.LENGTH_LONG).show()
+                    emptyView.visibility = View.VISIBLE
+                }
             }
         }
     }
@@ -142,10 +156,10 @@ class MainActivity : AppCompatActivity() {
         val sorted = if (prefs.worksByRecent) {
             works.sortedWith(
                 compareByDescending<Work> { prefs.lastReadTime(it.name) }
-                    .thenComparator { a, b -> Library.compareWorkNames(a.name, b.name) }
+                    .thenComparator { a, b -> Library.naturalCompareKeys(a.sortKey, b.sortKey) }
             )
         } else {
-            works.sortedWith { a, b -> Library.compareWorkNames(a.name, b.name) }
+            works.sortedWith { a, b -> Library.naturalCompareKeys(a.sortKey, b.sortKey) }
         }
         if (sorted.isEmpty()) {
             emptyText.setText(R.string.no_works)
@@ -196,6 +210,7 @@ class MainActivity : AppCompatActivity() {
             h.title.text = w.name
             h.subtitle.text = buildString {
                 append("$read / ${total}화 읽음")
+                if (w.subFolderCount > 0) append("  ·  폴더 ${w.subFolderCount}개")
                 if (last != null) append("  ·  최근: $last")
             }
             // 완독한 작품은 흐리게 표시
