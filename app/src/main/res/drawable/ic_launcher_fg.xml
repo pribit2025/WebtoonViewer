@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 세로로 긴 웹툰 컷 3장을 단순화한 아이콘 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#F5F5F7" android:pathData="M38,30h32v14h-32z" />
+    <path android:fillColor="#2997FF" android:pathData="M38,47h32v14h-32z" />
+    <path android:fillColor="#F5F5F7" android:pathData="M38,64h32v14h-32z" />
+</vector>

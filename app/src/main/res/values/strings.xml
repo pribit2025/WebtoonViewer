@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">웹툰 뷰어</string>
+    <string name="pick_folder">라이브러리 폴더 선택</string>
+    <string name="refresh">새로고침</string>
+    <string name="sort_works">작품 정렬 변경</string>
+    <string name="empty_library">라이브러리 폴더를 선택하세요.\n\n구조: 작품폴더 / 화별 zip·cbz</string>
+    <string name="no_works">작품이 없습니다.</string>
+    <string name="continue_read">이어보기</string>
+    <string name="reverse_order">정렬 순서 반전</string>
+    <string name="mark_all_unread">모두 안읽음으로</string>
+    <string name="prev">이전 화</string>
+    <string name="next">다음 화</string>
+    <string name="margin">좌우 여백</string>
+    <string name="background">배경</string>
+    <string name="volume_keys">볼륨키 스크롤</string>
+    <string name="tap_paging">상하 탭 스크롤</string>
+    <string name="bg_black">검정</string>
+    <string name="bg_gray">회색</string>
+    <string name="bg_white">흰색</string>
+    <string name="loading">불러오는 중…</string>
+    <string name="back">뒤로</string>
+</resources>
