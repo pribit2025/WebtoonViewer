@@ -226,13 +226,31 @@ class ReaderActivity : AppCompatActivity() {
             }
         }
 
-        // 탭 처리: 가운데 탭 = 메뉴 토글, (옵션) 위/아래 탭 = 한 화면 스크롤
+        // 탭 처리
+        // - 더블탭: 설정(메뉴) 표시/숨김  ← 드래그 중 실수로 메뉴가 뜨지 않도록 한 번 탭에서 변경
+        // - 한 번 탭: 메뉴가 떠 있으면 닫기, (옵션) 위/아래 탭 = 한 화면 스크롤
+        // - 스크롤이 움직이는 중에 손가락을 댄 터치(관성 스크롤 멈추기)는 탭으로 보지 않음
         val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent) = true
+            private var touchedWhileScrolling = false
+
+            override fun onDown(e: MotionEvent): Boolean {
+                touchedWhileScrolling = rv.scrollState != RecyclerView.SCROLL_STATE_IDLE
+                return true
+            }
+
+            private fun onFooter(e: MotionEvent): Boolean {
+                val child = rv.findChildViewUnder(e.x, e.y)
+                return child != null && rv.getChildViewHolder(child) is FooterVH
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (onFooter(e)) return false
+                showOverlay(!overlayVisible)
+                return true
+            }
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                val child = rv.findChildViewUnder(e.x, e.y)
-                if (child != null && rv.getChildViewHolder(child) is FooterVH) return false
+                if (touchedWhileScrolling || onFooter(e)) return false
                 if (overlayVisible) {
                     showOverlay(false)
                     return true
@@ -244,8 +262,7 @@ class ReaderActivity : AppCompatActivity() {
                         e.y > h * 0.7f -> { scrollScreen(1); return true }
                     }
                 }
-                showOverlay(true)
-                return true
+                return false
             }
         })
         rv.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
