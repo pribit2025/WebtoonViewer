@@ -10,9 +10,9 @@ import android.net.Uri
  */
 class Prefs(ctx: Context) {
 
-    private val settings: SharedPreferences =
+    internal val settings: SharedPreferences =
         ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    private val progress: SharedPreferences =
+    internal val progress: SharedPreferences =
         ctx.getSharedPreferences("progress", Context.MODE_PRIVATE)
 
     // ---------------- 설정 ----------------

@@ -41,15 +41,21 @@ class MainActivity : AppCompatActivity() {
     private val pickFolder =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
             if (uri != null) {
+                // 읽기+쓰기 권한 (쓰기는 열람 기록 백업 파일 저장용)
                 try {
                     contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     )
                 } catch (e: SecurityException) {
-                    Toast.makeText(this, "폴더 권한을 얻지 못했습니다.", Toast.LENGTH_SHORT).show()
+                    try {
+                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    } catch (e2: SecurityException) {
+                        Toast.makeText(this, "폴더 권한을 얻지 못했습니다.", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 prefs.treeUri = uri
-                scan()
+                works = emptyList()
+                restoreThenScan(uri)
             }
         }
 
@@ -82,6 +88,24 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         // 리더에서 돌아왔을 때 진행 상태/정렬 갱신
         if (works.isNotEmpty()) showWorks()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Backup.saveAsync(this)
+    }
+
+    /** 라이브러리 폴더의 백업 파일에서 열람 기록을 복원한 뒤 스캔 */
+    private fun restoreThenScan(tree: Uri) {
+        lifecycleScope.launch {
+            val added = withContext(Dispatchers.IO) {
+                runCatching { Backup.restore(this@MainActivity, tree) }.getOrDefault(0)
+            }
+            if (added > 0) {
+                Toast.makeText(this@MainActivity, "이전 열람 기록을 복원했습니다.", Toast.LENGTH_SHORT).show()
+            }
+            scan()
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {

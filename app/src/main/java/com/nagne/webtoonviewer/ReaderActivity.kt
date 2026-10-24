@@ -136,6 +136,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         savePosition()
+        Backup.saveAsync(this)
     }
 
     override fun onDestroy() {

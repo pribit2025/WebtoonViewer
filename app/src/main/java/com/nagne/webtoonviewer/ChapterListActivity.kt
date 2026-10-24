@@ -71,6 +71,11 @@ class ChapterListActivity : AppCompatActivity() {
         load()
     }
 
+    override fun onPause() {
+        super.onPause()
+        Backup.saveAsync(this)
+    }
+
     override fun onResume() {
         super.onResume()
         if (chapters.isNotEmpty() || folders.isNotEmpty()) {
