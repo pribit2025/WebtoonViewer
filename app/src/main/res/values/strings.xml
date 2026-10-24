@@ -13,8 +13,6 @@
     <string name="next">다음 화</string>
     <string name="margin">좌우 여백</string>
     <string name="background">배경</string>
-    <string name="volume_keys">볼륨키 스크롤</string>
-    <string name="tap_paging">상하 탭 스크롤</string>
     <string name="bg_black">검정</string>
     <string name="bg_gray">회색</string>
     <string name="bg_white">흰색</string>

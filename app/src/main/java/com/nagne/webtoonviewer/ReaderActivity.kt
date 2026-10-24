@@ -6,9 +6,9 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.view.GestureDetector
-import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -26,7 +26,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
-import com.google.android.material.materialswitch.MaterialSwitch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -51,6 +50,9 @@ class ReaderActivity : AppCompatActivity() {
 
         private const val TYPE_PAGE = 0
         private const val TYPE_FOOTER = 1
+
+        /** 좌우 여백 최대값(%) — 여백 슬라이더 max 와 동일 */
+        private const val MAX_MARGIN = 40
     }
 
     private lateinit var prefs: Prefs
@@ -88,6 +90,7 @@ class ReaderActivity : AppCompatActivity() {
     private var overlayVisible = false
     private var userSeeking = false
     private var lastWidth = 0
+    private var pinchWidth = 1f
 
     private val currentKey get() = prefs.key(workName, names[index])
 
@@ -255,21 +258,43 @@ class ReaderActivity : AppCompatActivity() {
                     showOverlay(false)
                     return true
                 }
-                if (prefs.tapPaging) {
-                    val h = rv.height
-                    when {
-                        e.y < h * 0.3f -> { scrollScreen(-1); return true }
-                        e.y > h * 0.7f -> { scrollScreen(1); return true }
-                    }
-                }
                 return false
             }
         })
-        rv.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
-            override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
-                detector.onTouchEvent(e)
-                return false
+        // 두 손가락 핀치: 벌리면 이미지 확대(여백 감소), 오므리면 축소(여백 증가)
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                if (!isWideScreen() || pages.isEmpty()) return false // 접은 화면은 항상 폭맞춤
+                pinchWidth = 1f - 2f * prefs.marginPercent / 100f
+                return true
             }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                // 이미지 표시 폭 비율(1.0 = 여백 0%)에 배율을 곱해 여백으로 환산
+                pinchWidth = (pinchWidth * detector.scaleFactor).coerceIn(1f - 2f * MAX_MARGIN / 100f, 1f)
+                val m = ((1f - pinchWidth) * 50f).roundToInt().coerceIn(0, MAX_MARGIN)
+                if (m != prefs.marginPercent) {
+                    prefs.marginPercent = m
+                    seekMargin.progress = m
+                    marginText.text = "$m%"
+                    applyMargin(m, keepAnchor = true)
+                }
+                return true
+            }
+        })
+        rv.addOnItemTouchListener(object : RecyclerView.OnItemTouchListener {
+            override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                scaleDetector.onTouchEvent(e)
+                detector.onTouchEvent(e)
+                // 두 번째 손가락이 닿으면 스크롤 대신 핀치로 처리
+                return e.pointerCount >= 2 && isWideScreen() && pages.isNotEmpty()
+            }
+
+            override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
+                scaleDetector.onTouchEvent(e)
+            }
+
+            override fun onRequestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {}
         })
     }
 
@@ -318,14 +343,6 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         // 옵션
-        findViewById<MaterialSwitch>(R.id.sw_volume).apply {
-            isChecked = prefs.volumeKeys
-            setOnCheckedChangeListener { _, v -> prefs.volumeKeys = v }
-        }
-        findViewById<MaterialSwitch>(R.id.sw_tap).apply {
-            isChecked = prefs.tapPaging
-            setOnCheckedChangeListener { _, v -> prefs.tapPaging = v }
-        }
     }
 
     // ---------------------------------------------------------------- 화 열기
@@ -490,10 +507,6 @@ class ReaderActivity : AppCompatActivity() {
         rv.setBackgroundColor(color)
     }
 
-    private fun scrollScreen(dir: Int) {
-        rv.smoothScrollBy(0, dir * (rv.height * 0.85f).toInt())
-    }
-
     // ---------------------------------------------------------------- 오버레이/시스템바
 
     private fun showOverlay(show: Boolean) {
@@ -509,25 +522,6 @@ class ReaderActivity : AppCompatActivity() {
         c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         if (visible) c.show(WindowInsetsCompat.Type.systemBars())
         else c.hide(WindowInsetsCompat.Type.systemBars())
-    }
-
-    // ---------------------------------------------------------------- 볼륨키 스크롤
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (prefs.volumeKeys && pages.isNotEmpty()) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_VOLUME_DOWN -> { scrollScreen(1); return true }
-                KeyEvent.KEYCODE_VOLUME_UP -> { scrollScreen(-1); return true }
-            }
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        if (prefs.volumeKeys && pages.isNotEmpty() &&
-            (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP)
-        ) return true
-        return super.onKeyUp(keyCode, event)
     }
 
     // ---------------------------------------------------------------- 어댑터

@@ -221,19 +221,5 @@
             </com.google.android.material.button.MaterialButtonToggleGroup>
         </LinearLayout>
 
-        <!-- 옵션 스위치 -->
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/sw_volume"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/volume_keys"
-            android:textColor="@color/text" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/sw_tap"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/tap_paging"
-            android:textColor="@color/text" />
     </LinearLayout>
 </FrameLayout>

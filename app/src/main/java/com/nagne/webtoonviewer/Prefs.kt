@@ -31,14 +31,6 @@ class Prefs(ctx: Context) {
         get() = settings.getInt("bg", 0)
         set(v) = settings.edit().putInt("bg", v).apply()
 
-    var volumeKeys: Boolean
-        get() = settings.getBoolean("volume_keys", true)
-        set(v) = settings.edit().putBoolean("volume_keys", v).apply()
-
-    var tapPaging: Boolean
-        get() = settings.getBoolean("tap_paging", false)
-        set(v) = settings.edit().putBoolean("tap_paging", v).apply()
-
     /** 화 목록 내림차순 표시 여부 */
     var chapterDesc: Boolean
         get() = settings.getBoolean("chapter_desc", false)
